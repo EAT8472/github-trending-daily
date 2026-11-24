@@ -1,22 +1,36 @@
 import requests
 import json
 from datetime import datetime
+import xml.etree.ElementTree as ET
 
-# ========== 配置区（这里改你的推送webhook）==========
+# ========== 配置区 ==========
 WEBHOOK_URL = ""
 PUSH_CHANNEL = "wecom"  # wecom / dingtalk / feishu
 TOP_NUM = 5
-# 可选：接入大模型生成中文摘要，不用可以留空
+# 可选：LLM摘要，不用就留空
 LLM_API_KEY = ""
 LLM_BASE_URL = "https://api.deepseek.com/v1"
-# =================================================
+# ============================
 
-def get_github_trending(top=5):
-    # 替换成稳定接口
-    resp = requests.get("https://api.trending-github.com/github/repositories?since=daily", timeout=20)
-    resp.raise_for_status()
-    data = resp.json()
-    return data[:top]
+def get_github_trending_rss(top=5):
+    # GitHub官方Trending RSS，英文每日热榜
+    url = "https://github.com/trending?since=daily&rss=1"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(url, headers=headers, timeout=20)
+    root = ET.fromstring(resp.text)
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    items = root.findall("atom:entry", ns)
+    repo_list = []
+    for item in items[:top]:
+        title = item.find("atom:title", ns).text
+        link = item.find("atom:link", ns).attrib["href"]
+        desc = item.find("atom:summary", ns).text
+        repo_list.append({
+            "name": title,
+            "url": link,
+            "description": desc
+        })
+    return repo_list
 
 def ai_summary(repo):
     if not LLM_API_KEY:
@@ -41,8 +55,7 @@ def build_msg(repo_list):
     msg = f"📌 GitHub开源热榜 TOP{TOP_NUM}｜{today}\n"
     for idx, repo in enumerate(repo_list, start=1):
         summary = ai_summary(repo)
-        star = repo.get("stars", 0)
-        msg += f"\n#{idx} **{repo['name']}** ⭐{star}\n{summary}\n🔗 {repo['url']}"
+        msg += f"\n#{idx} **{repo['name']}**\n{summary}\n🔗 {repo['url']}"
     return msg
 
 def send_msg(content):
@@ -55,7 +68,10 @@ def send_msg(content):
     requests.post(WEBHOOK_URL, json=body, timeout=15)
 
 if __name__ == "__main__":
-    repos = get_github_trending(TOP_NUM)
-    text = build_msg(repos)
-    send_msg(text)
-    print("✅ 推送完成")
+    try:
+        repos = get_github_trending_rss(TOP_NUM)
+        text = build_msg(repos)
+        send_msg(text)
+        print("✅ 推送完成")
+    except Exception as e:
+        print(f"❌ 脚本异常：{str(e)}")
