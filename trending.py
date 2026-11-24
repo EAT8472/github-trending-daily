@@ -3,27 +3,28 @@ import json
 from datetime import datetime
 
 # ========== 配置区（这里改你的推送webhook）==========
-WEBHOOK_URL = ""  # 企业微信/钉钉/飞书webhook地址
+WEBHOOK_URL = ""
 PUSH_CHANNEL = "wecom"  # wecom / dingtalk / feishu
 TOP_NUM = 5
-# 可选：接入大模型生成项目中文简介（DeepSeek/豆包API）
+# 可选：接入大模型生成中文摘要，不用可以留空
 LLM_API_KEY = ""
 LLM_BASE_URL = "https://api.deepseek.com/v1"
 # =================================================
 
 def get_github_trending(top=5):
-    # 免费公共trending接口，返回每日热榜
-    resp = requests.get("https://gitstock.org/api/v1/github?period=daily", timeout=20)
+    # 替换成稳定接口
+    resp = requests.get("https://api.trending-github.com/github/repositories?since=daily", timeout=20)
+    resp.raise_for_status()
     data = resp.json()
     return data[:top]
 
 def ai_summary(repo):
     if not LLM_API_KEY:
-        return repo["description"]
+        return repo.get("description", "暂无描述")
     prompt = f"""
 给这个GitHub开源项目写简短中文介绍，一句话讲清楚用途：
-项目名：{repo['repo']}
-描述：{repo['description']}
+项目名：{repo['name']}
+描述：{repo.get('description','')}
 链接：{repo['url']}
 """
     payload = {
@@ -40,14 +41,15 @@ def build_msg(repo_list):
     msg = f"📌 GitHub开源热榜 TOP{TOP_NUM}｜{today}\n"
     for idx, repo in enumerate(repo_list, start=1):
         summary = ai_summary(repo)
-        msg += f"\n#{idx} **{repo['repo']}** ⭐{repo['stars']}\n{summary}\n🔗 {repo['url']}"
+        star = repo.get("stars", 0)
+        msg += f"\n#{idx} **{repo['name']}** ⭐{star}\n{summary}\n🔗 {repo['url']}"
     return msg
 
 def send_msg(content):
     if PUSH_CHANNEL == "wecom":
         body = {"msgtype":"text", "text":{"content":content}}
     elif PUSH_CHANNEL == "dingtalk":
-        body = {"msgtype":"text", "text":{"content":content}}
+        body = {"msgtype":"text", "text":{"content":{"text":content}}}
     elif PUSH_CHANNEL == "feishu":
         body = {"msgtype":"text", "text":{"content":{"text":content}}}
     requests.post(WEBHOOK_URL, json=body, timeout=15)
